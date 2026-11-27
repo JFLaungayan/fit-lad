@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-export const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+export const supabaseKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined
 export const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
 
 export type Exercise = { id:string; name:string; muscle:string; equipment:string }
@@ -11,7 +11,6 @@ export type SessionExercise = { id:string; name:string; muscle:string; targetSet
 export type Session = { id:string; userId:string; userName:string; planId:string|null; name:string; date:string; startedAt:string; finishedAt:string|null; duration:number; status:'in_progress'|'completed'|'cancelled'; notes:string; exercises:SessionExercise[] }
 export type Schedule = { id:string; planId:string; day:number; active:boolean }
 export type AppData = { plans:Plan[]; sessions:Session[]; schedules:Schedule[] }
-export const people = [{id:'me',name:'Alex',initials:'AL',color:'orange'},{id:'partner',name:'Sam',initials:'SM',color:'purple'}]
 export const library:Exercise[] = [
   ['Barbell Bench Press','Chest','Barbell'],['Incline Dumbbell Press','Chest','Dumbbell'],['Cable Fly','Chest','Cable'],['Push-up','Chest','Bodyweight'],
   ['Barbell Row','Back','Barbell'],['Lat Pulldown','Back','Cable'],['Pull-ups','Back','Bodyweight'],['Seated Cable Row','Back','Cable'],['Deadlift','Back','Barbell'],['Romanian Deadlift','Hamstrings','Barbell'],
@@ -24,7 +23,12 @@ export const seedData:AppData = {
   {id:'plan-b',name:'Full Body B',description:'A second full body day.',exercises:[['Deadlift','Back',3,'5–6'],['Overhead Press','Shoulders',3,'8–10'],['Lat Pulldown','Back',3,'10–12'],['Leg Press','Quadriceps',3,'10–12']].map(([name,muscle,sets,reps],i)=>({id:`pb-${i}`,exerciseId:`lib-${i+4}`,name:String(name),muscle:String(muscle),sets:Number(sets),reps:String(reps),weight:null,notes:''}))}
  ], sessions:[], schedules:[{id:'s1',planId:'plan-a',day:1,active:true},{id:'s2',planId:'plan-b',day:3,active:true},{id:'s3',planId:'plan-a',day:5,active:true}]
 }
-export function readData():AppData { try { const v=localStorage.getItem('form-fitness-data'); return v?JSON.parse(v):seedData } catch { return seedData } }
-export function saveData(data:AppData) { localStorage.setItem('form-fitness-data',JSON.stringify(data)) }
+export type UserProfile={id:string;name:string;email:string;initials:string;color:string}
+export function readData(userId='demo'):AppData { try { const v=localStorage.getItem(`form-fitness-data:${userId}`) || (userId==='demo'?localStorage.getItem('form-fitness-data'):null); return v?JSON.parse(v):structuredClone(seedData) } catch { return structuredClone(seedData) } }
+export function saveData(data:AppData,userId='demo') { localStorage.setItem(`form-fitness-data:${userId}`,JSON.stringify(data)) }
+const authKey='form-demo-accounts'
+export async function createDemoAccount(name:string,email:string,password:string):Promise<UserProfile>{const accounts=JSON.parse(localStorage.getItem(authKey)||'[]') as {id:string;name:string;email:string;salt:string;hash:string}[];if(accounts.some(a=>a.email.toLowerCase()===email.toLowerCase()))throw new Error('An account with that email already exists.');const salt=crypto.getRandomValues(new Uint8Array(16)),encoder=new TextEncoder(),key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']),bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:120000,hash:'SHA-256'},key,256);const account={id:crypto.randomUUID(),name:name.trim(),email:email.trim(),salt:Array.from(salt).join(','),hash:Array.from(new Uint8Array(bits)).join(',')};accounts.push(account);localStorage.setItem(authKey,JSON.stringify(accounts));return toProfile(account)}
+export async function loginDemoAccount(email:string,password:string):Promise<UserProfile>{const accounts=JSON.parse(localStorage.getItem(authKey)||'[]') as {id:string;name:string;email:string;salt:string;hash:string}[],account=accounts.find(a=>a.email.toLowerCase()===email.trim().toLowerCase());if(!account)throw new Error('No account found with that email.');const salt=new Uint8Array(account.salt.split(',').map(Number)),encoder=new TextEncoder(),key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']),bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:120000,hash:'SHA-256'},key,256),hash=Array.from(new Uint8Array(bits)).join(',');if(hash!==account.hash)throw new Error('Incorrect password.');return toProfile(account)}
+function toProfile(a:{id:string;name:string;email:string}):UserProfile{return {id:a.id,name:a.name,email:a.email,initials:a.name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase(),color:'orange'}}
 export function makeSession(plan:Plan,userId:string,userName:string,date=new Date()):Session { const now=date.toISOString(); return {id:crypto.randomUUID(),userId,userName,planId:plan.id,name:plan.name,date:now.slice(0,10),startedAt:now,finishedAt:null,duration:0,status:'in_progress',notes:'',exercises:plan.exercises.map(e=>({id:crypto.randomUUID(),name:e.name,muscle:e.muscle,targetSets:e.sets,targetReps:e.reps,status:'pending',notes:e.notes,sets:Array.from({length:e.sets},()=>({id:crypto.randomUUID(),weight:e.weight,reps:null,done:false}))}))} }
 export function sessionStats(s:Session){const sets=s.exercises.flatMap(e=>e.sets).filter(x=>x.done);return {sets:sets.length,volume:sets.reduce((a,x)=>a+(x.weight||0)*(x.reps||0),0),completed:s.exercises.filter(e=>e.status==='completed').length,skipped:s.exercises.filter(e=>e.status==='skipped').length}}
